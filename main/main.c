@@ -16,21 +16,37 @@
 
 #include "driver/isp.h"
 
-#include "ov9281.h"
+//#include "ov9281.h"
+#include "vd56g3.h"
 
 
 #define I2C_SDA_IO_NUM              7
 #define I2C_SCL_IO_NUM              8
 #define I2C_PORT_NUM                0
 
-#define SENSOR_DEFAULT_FORMAT_NAME  "MIPI_2lane_24Minput_RAW8_640x400_100fps"
+
 #define SENSOR_SCCB_FREQ            100000
+
+#ifdef OV9281_SCCB_ADDR
+#define SENSOR_DEFAULT_FORMAT_NAME  "MIPI_2lane_24Minput_RAW8_640x400_100fps"
 #define SENSOR_SCCB_ADDR            OV9281_SCCB_ADDR
 #define SENSOR_BYTES_PER_PIXEL      1
-
 #define MIPI_CSI_DISP_HSIZE         640
 #define MIPI_CSI_DISP_VSIZE         400
 #define MIPI_CSI_LANE_BITRATE_MBPS  400
+#define sensor_detect_function(x)   ov9281_detect(x)
+#elif defined(VD56G3_SCCB_ADDR)
+// VD56G3
+#define SENSOR_DEFAULT_FORMAT_NAME  "MIPI_2lane_12Minput_RAW8_480x640_88fps"
+#define SENSOR_SCCB_ADDR            VD56G3_SCCB_ADDR
+#define SENSOR_BYTES_PER_PIXEL      1
+#define MIPI_CSI_DISP_HSIZE         480
+#define MIPI_CSI_DISP_VSIZE         640
+#define MIPI_CSI_LANE_BITRATE_MBPS  400
+#define sensor_detect_function(x)   vd56g3_detect(x)
+#else
+#error "No image sensor driver included"
+#endif
 
 static const char *TAG = "main";
 
@@ -65,7 +81,7 @@ esp_err_t sensor_init(void)
     ESP_ERROR_CHECK(sccb_new_i2c_io(i2c_bus_handle, &i2c_config, &cam_config.sccb_handle));
 
     esp_cam_sensor_device_t *cam = NULL;
-    cam = ov9281_detect(&cam_config);
+    cam = sensor_detect_function(&cam_config);
 
     if (!cam) {
         ESP_LOGE(TAG, "failed to detect camera sensor");
