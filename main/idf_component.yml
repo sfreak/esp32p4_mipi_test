@@ -14,4 +14,8 @@ dependencies:
   #   # `public` flag doesn't have an effect dependencies of the `main` component.
   #   # All dependencies of `main` are public by default.
   #   public: true
-  espressif/esp_cam_sensor: '*'
+  espressif/esp_cam_sensor: '>=2.1.0'
+  vd56g3:
+    #version: feature/test
+    #path: test_component
+    git: https://github.com/sfreak/vd56g3.git
