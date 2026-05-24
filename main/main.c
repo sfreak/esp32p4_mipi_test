@@ -19,6 +19,8 @@
 //#include "ov9281.h"
 #include "vd56g3.h"
 
+#include "csi_lowlevel.h"
+
 
 #define I2C_SDA_IO_NUM              7
 #define I2C_SCL_IO_NUM              8
@@ -216,12 +218,19 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_cam_ctlr_start(handle));
     ESP_LOGI("CAM", "Camera controller started successfully");
 
+    usleep(1000*100);
+    csi_readerrors();
+    usleep(1000*100);
+    csi_readerrors();
+    usleep(1000*100);
+
     ESP_LOGI(TAG, "Main loop");
     while(1)
     {
         ESP_LOGI(TAG, "calling esp_cam_ctlr_receive...");
         ESP_ERROR_CHECK(esp_cam_ctlr_receive(handle, &new_trans, ESP_CAM_CTLR_MAX_DELAY));
         ESP_LOGI(TAG, "esp_cam_ctlr_receive returned");
+        csi_readerrors();
         usleep(1000);
     }
 
