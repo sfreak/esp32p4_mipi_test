@@ -175,6 +175,7 @@ void task_monitor(void * pvParameters)
     {
         vTaskDelay(1000/portTICK_PERIOD_MS); // 1s
         ESP_LOGI(TAG, "frames: %u", g_framecount);
+        csi_ll_logstatus();
     }
 
 }
@@ -233,7 +234,8 @@ void app_main(void)
         .output_data_color_type = csi_color,
         .data_lane_num = sensor_cfg.cam_cur_fmt->mipi_info.lane_num,
         .byte_swap_en = false,
-        .queue_items = 2,
+        .queue_items = 2, // FIXME: unclear what this does... 
+        // should we provide multiple famebuffers? may handle than in mipi_on_get_new_trans()?
     };
     esp_cam_ctlr_handle_t handle = NULL;
     
@@ -247,10 +249,10 @@ void app_main(void)
         return;
     }
 
-    ESP_LOGD(TAG, "HSIZE: %d, VSIZE: %d, bits per pixel: %d", 
+    ESP_LOGI(TAG, "HSIZE: %u, VSIZE: %u, bytes per pixel: %.3f", 
         sensor_cfg.cam_cur_fmt->width, sensor_cfg.cam_cur_fmt->height, bytes_per_pixel);
-    ESP_LOGD(TAG, "frame_buffer_size: %zu", frame_buffer_size);
-    ESP_LOGD(TAG, "frame_buffer: %p", frame_buffer);
+    ESP_LOGI(TAG, "frame_buffer_size: %zu", frame_buffer_size);
+    ESP_LOGI(TAG, "frame_buffer: %p", frame_buffer);
 
     esp_cam_ctlr_trans_t new_trans = {
         .buffer = frame_buffer,

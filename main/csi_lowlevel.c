@@ -30,13 +30,10 @@ void csi_ll_force_error()
 
 void csi_ll_logstatus()
 {
-    //ESP_LOGI(TAG, "csi_readerrors");
-
     csi_host_dev_t *csi_host = MIPI_CSI_HOST_LL_GET_HW(0);
 
-
-    ESP_LOGI(TAG, "CSI_HOST_VERSION_REG       = 0x%08x", csi_host->version.val);
-    ESP_LOGI(TAG, "CSI_HOST_N_LANES_REG       = 0x%08x", csi_host->n_lanes.val);
+    //ESP_LOGI(TAG, "CSI_HOST_VERSION_REG       = 0x%08x", csi_host->version.val);
+    //ESP_LOGI(TAG, "CSI_HOST_N_LANES_REG       = 0x%08x", csi_host->n_lanes.val);
     ESP_LOGI(TAG, "CSI_HOST_PHY_RX_REG          clk act: %u, data0 ULP: %u, data1 ULP: %u", 
         csi_host->phy_rx.phy_rxclkactivehs,csi_host->phy_rx.phy_rxulpsesc_0, csi_host->phy_rx.phy_rxulpsesc_1);
     ESP_LOGI(TAG, "CSI_HOST_INT_ST_MAIN_REG   = 0x%08x", csi_host->int_st_main.val);
