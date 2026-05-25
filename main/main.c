@@ -12,8 +12,11 @@
 #include "esp_sccb_i2c.h"
 #include "esp_cam_sensor_detect.h"
 #include "driver/isp.h"
+#include "soc/interrupts.h"
 #include "esp_intr_types.h"
 #include "esp_intr_alloc.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "csi_lowlevel.h"
 
@@ -31,6 +34,7 @@
 
 
 static const char *TAG = "main";
+static volatile uint32_t g_framecount = 0;
 
 typedef struct {
     i2c_master_bus_handle_t i2c_bus_handle;
@@ -131,7 +135,7 @@ esp_err_t sensor_init(sensor_config_t *out_cfg)
 
 bool mipi_on_get_new_trans(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data)
 {
-    ESP_EARLY_LOGI(TAG, "mipi_on_get_new_trans");
+    //ESP_EARLY_LOGI(TAG, "mipi_on_get_new_trans");
     
     esp_cam_ctlr_trans_t new_trans = *(esp_cam_ctlr_trans_t *)user_data;
     trans->buffer = new_trans.buffer;
@@ -142,18 +146,50 @@ bool mipi_on_get_new_trans(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *t
 
 bool mipi_on_trans_finished(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data)
 {
-    ESP_EARLY_LOGI(TAG, "mipi_on_trans_finished: %u bytes received", trans->received_size);
+    //ESP_EARLY_LOGI(TAG, "mipi_on_trans_finished: %u bytes received", trans->received_size);
+
+    g_framecount++;
+
     return false;
 }
 
 void isr_isp(void *arg)
-{}
+{
+    ESP_EARLY_LOGI(TAG, "isr_isp");
+}
 
-void isr_csi_error(void *arg)
-{}
+void isr_csi(void *arg)
+{
+    //ESP_EARLY_LOGI(TAG, "isr_csi");
+    csi_ll_logstatus_from_isr();
+}
+
+void isr_csi_bridge(void *arg)
+{
+    ESP_EARLY_LOGI(TAG, "isr_csi_bridge");
+}
+
+void task_monitor(void * pvParameters)
+{
+    while(true)
+    {
+        vTaskDelay(1000/portTICK_PERIOD_MS); // 1s
+        ESP_LOGI(TAG, "frames: %u", g_framecount);
+    }
+
+}
 
 void app_main(void)
 {
+    // interrput setup
+    intr_handle_t handle_isr_csi;
+    intr_handle_t handle_isr_isp;
+    intr_handle_t handle_isr_csi_bridge;
+    ESP_ERROR_CHECK(esp_intr_alloc(ETS_CSI_INTR_SOURCE, 0, isr_csi, NULL, &handle_isr_csi));
+    ESP_ERROR_CHECK(esp_intr_alloc(ETS_ISP_INTR_SOURCE, 0, isr_isp, NULL, &handle_isr_isp));
+    ESP_ERROR_CHECK(esp_intr_alloc(ETS_CSI_BRIDGE_INTR_SOURCE, 0, isr_csi_bridge, NULL, &handle_isr_csi_bridge));
+    esp_intr_dump(NULL);
+    // TODO: need to unmask interrupt source in the configuration of each periphery
 
     //mipi ldo
     esp_ldo_channel_handle_t ldo_mipi_phy = NULL;
@@ -163,6 +199,9 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(esp_ldo_acquire_channel(&ldo_mipi_phy_config, &ldo_mipi_phy));
 
+    // initialize image sensor
+    // selects the image format and stores a pointer in sensor_cfg.cam_cur_fmt
+    // starts the streaming of frames
     sensor_config_t sensor_cfg = {0};
     ESP_ERROR_CHECK(sensor_init(&sensor_cfg));
 
@@ -228,6 +267,8 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_cam_ctlr_enable(handle));
 
+    csi_ll_en_int();
+
     //---------------ISP Init------------------//
     isp_proc_handle_t isp_proc = NULL;
     esp_isp_processor_cfg_t isp_config = {
@@ -247,11 +288,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_cam_ctlr_start(handle));
     ESP_LOGI("CAM", "Camera controller started successfully");
 
-    usleep(1000*100);
-    csi_readerrors();
-    usleep(1000*100);
-    csi_readerrors();
-    usleep(1000*100);
+    xTaskCreate(task_monitor, "monitor", 4*1024, NULL, tskIDLE_PRIORITY, NULL);
 
     ESP_LOGI(TAG, "Main loop");
     while(1)
@@ -259,8 +296,6 @@ void app_main(void)
         ESP_LOGI(TAG, "calling esp_cam_ctlr_receive...");
         ESP_ERROR_CHECK(esp_cam_ctlr_receive(handle, &new_trans, ESP_CAM_CTLR_MAX_DELAY));
         ESP_LOGI(TAG, "esp_cam_ctlr_receive returned");
-        csi_readerrors();
         usleep(1000);
     }
-
 }

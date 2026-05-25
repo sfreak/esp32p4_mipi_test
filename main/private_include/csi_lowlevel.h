@@ -8,7 +8,10 @@
 extern "C" {
 #endif
 
-esp_err_t csi_readerrors(void);
+void csi_ll_en_int(void);
+void csi_ll_force_error(void);
+void csi_ll_logstatus(void);
+void csi_ll_logstatus_from_isr(void);
 
 #ifdef __cplusplus
 }
