@@ -30,8 +30,12 @@
 
 // FIXME: dynamically adjust frame sizes to match detected image sensor
 // this will only work for OV9281:
-#define SENSOR_DEFAULT_FORMAT_NAME  "MIPI_2lane_24Minput_RAW8_640x400_100fps"
+//#define SENSOR_DEFAULT_FORMAT_NAME  "MIPI_2lane_24Minput_RAW8_640x400_100fps"
+//#define SENSOR_DEFAULT_FORMAT_NAME "MIPI_2lane_24Minput_RAW8_1280x720_50fps"
 
+//#define SENSOR_DEFAULT_FORMAT_NAME "MIPI_2lane_12Minput_RAW10_1120x1360_8fps"
+//#define SENSOR_DEFAULT_FORMAT_NAME "MIPI_2lane_12Minput_RAW8_1120x1360_8fps"
+#define SENSOR_DEFAULT_FORMAT_NAME "MIPI_2lane_12Minput_RAW8_480x640_8fps"
 
 static const char *TAG = "main";
 static volatile uint32_t g_framecount = 0;
@@ -40,6 +44,7 @@ typedef struct {
     i2c_master_bus_handle_t i2c_bus_handle;
     esp_sccb_io_handle_t sccb_handle;
     esp_cam_sensor_format_t *cam_cur_fmt;
+    esp_cam_sensor_device_t *cam;
 } sensor_config_t;
 
 esp_err_t sensor_init(sensor_config_t *out_cfg)
@@ -128,6 +133,7 @@ esp_err_t sensor_init(sensor_config_t *out_cfg)
     out_cfg->i2c_bus_handle = i2c_bus_handle;
     out_cfg->sccb_handle = cam_config.sccb_handle;
     out_cfg->cam_cur_fmt = cam_cur_fmt;
+    out_cfg->cam = cam;
 
     return ret;
 }
@@ -146,7 +152,10 @@ bool mipi_on_get_new_trans(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *t
 
 bool mipi_on_trans_finished(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *trans, void *user_data)
 {
-    //ESP_EARLY_LOGI(TAG, "mipi_on_trans_finished: %u bytes received", trans->received_size);
+    ESP_EARLY_LOGI(TAG, "mipi_on_trans_finished: %u bytes received", trans->received_size);
+
+    esp_cam_ctlr_trans_t *new_trans = (esp_cam_ctlr_trans_t *)user_data;
+    new_trans->received_size = trans->received_size;
 
     g_framecount++;
 
@@ -218,7 +227,7 @@ void app_main(void)
     case ESP_CAM_SENSOR_PIXFORMAT_RAW10:
         csi_color = CAM_CTLR_COLOR_RAW10;
         isp_color = ISP_COLOR_RAW10;
-        bytes_per_pixel = 5/4;
+        bytes_per_pixel = 5.0/4.0;
         break;
     default:
         ESP_LOGE(TAG, "unsupported pixel format");
@@ -234,7 +243,7 @@ void app_main(void)
         .output_data_color_type = csi_color,
         .data_lane_num = sensor_cfg.cam_cur_fmt->mipi_info.lane_num,
         .byte_swap_en = false,
-        .queue_items = 2, // FIXME: unclear what this does... 
+        .queue_items = 1, // FIXME: unclear what this does... 
         // should we provide multiple famebuffers? may handle than in mipi_on_get_new_trans()?
     };
     esp_cam_ctlr_handle_t handle = NULL;
@@ -274,6 +283,7 @@ void app_main(void)
     //---------------ISP Init------------------//
     isp_proc_handle_t isp_proc = NULL;
     esp_isp_processor_cfg_t isp_config = {
+        .clk_src = ISP_CLK_SRC_DEFAULT,
         .clk_hz = 80 * 1000 * 1000,
         .input_data_source = ISP_INPUT_DATA_SOURCE_CSI,
         .input_data_color_type = isp_color,
@@ -282,22 +292,38 @@ void app_main(void)
         .has_line_end_packet = false,
         .h_res = sensor_cfg.cam_cur_fmt->width,
         .v_res = sensor_cfg.cam_cur_fmt->height,
-        .flags.bypass_isp = false,
+        .flags.bypass_isp = true,
     };
     ESP_ERROR_CHECK(esp_isp_new_processor(&isp_config, &isp_proc));
-    ESP_ERROR_CHECK(esp_isp_enable(isp_proc));
+    //ESP_ERROR_CHECK(esp_isp_enable(isp_proc)); // can't enable a bypassed ISP
 
     ESP_ERROR_CHECK(esp_cam_ctlr_start(handle));
     ESP_LOGI("CAM", "Camera controller started successfully");
 
-    xTaskCreate(task_monitor, "monitor", 4*1024, NULL, tskIDLE_PRIORITY, NULL);
+    //xTaskCreate(task_monitor, "monitor", 4*1024, NULL, tskIDLE_PRIORITY, NULL);
 
-    ESP_LOGI(TAG, "Main loop");
-    while(1)
+    //ESP_LOGI(TAG, "Main loop");
+    //while(1)
     {
         ESP_LOGI(TAG, "calling esp_cam_ctlr_receive...");
         ESP_ERROR_CHECK(esp_cam_ctlr_receive(handle, &new_trans, ESP_CAM_CTLR_MAX_DELAY));
         ESP_LOGI(TAG, "esp_cam_ctlr_receive returned");
-        usleep(1000);
+        usleep(1000*1000); // 1s
     }
+
+    int enable_flag = 0;
+    ESP_ERROR_CHECK(esp_cam_sensor_ioctl(sensor_cfg.cam, ESP_CAM_SENSOR_IOC_S_STREAM, &enable_flag));
+
+    ESP_LOGI(TAG, "Streaming stopped");
+
+
+    ESP_LOGI(TAG, "%u bytes in framebuffer", new_trans.received_size);
+
+    uint8_t *buf = (uint8_t *)new_trans.buffer;
+    for(uint32_t i=0 ; i<new_trans.received_size ; i++)
+    {
+        printf(" %02x", buf[i]);
+        if (i%1024 == 0) vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+
 }
