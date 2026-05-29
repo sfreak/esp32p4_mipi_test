@@ -18,24 +18,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "csi_lowlevel.h"
-
 
 #define I2C_SDA_IO_NUM              7
 #define I2C_SCL_IO_NUM              8
 #define I2C_PORT_NUM                0
 
-
 #define SENSOR_SCCB_FREQ            100000
 
-// FIXME: dynamically adjust frame sizes to match detected image sensor
-// this will only work for OV9281:
-//#define SENSOR_DEFAULT_FORMAT_NAME  "MIPI_2lane_24Minput_RAW8_640x400_100fps"
-//#define SENSOR_DEFAULT_FORMAT_NAME "MIPI_2lane_24Minput_RAW8_1280x720_50fps"
-
-//#define SENSOR_DEFAULT_FORMAT_NAME "MIPI_2lane_12Minput_RAW10_1120x1360_8fps"
-//#define SENSOR_DEFAULT_FORMAT_NAME "MIPI_2lane_12Minput_RAW8_1120x1360_8fps"
-#define SENSOR_DEFAULT_FORMAT_NAME "MIPI_2lane_12Minput_RAW8_480x640_8fps"
+#define SENSOR_DEFAULT_FORMAT_NAME "MIPI_2lane_12Minput_RAW10_1120x1360_88fps"
 
 static const char *TAG = "main";
 static volatile uint32_t g_framecount = 0;
@@ -162,21 +152,6 @@ bool mipi_on_trans_finished(esp_cam_ctlr_handle_t handle, esp_cam_ctlr_trans_t *
     return false;
 }
 
-void isr_isp(void *arg)
-{
-    ESP_EARLY_LOGI(TAG, "isr_isp");
-}
-
-void isr_csi(void *arg)
-{
-    //ESP_EARLY_LOGI(TAG, "isr_csi");
-    csi_ll_logstatus_from_isr();
-}
-
-void isr_csi_bridge(void *arg)
-{
-    ESP_EARLY_LOGI(TAG, "isr_csi_bridge");
-}
 
 void task_monitor(void * pvParameters)
 {
@@ -184,23 +159,12 @@ void task_monitor(void * pvParameters)
     {
         vTaskDelay(1000/portTICK_PERIOD_MS); // 1s
         ESP_LOGI(TAG, "frames: %u", g_framecount);
-        csi_ll_logstatus();
     }
 
 }
 
 void app_main(void)
 {
-    // interrput setup
-    intr_handle_t handle_isr_csi;
-    intr_handle_t handle_isr_isp;
-    intr_handle_t handle_isr_csi_bridge;
-    ESP_ERROR_CHECK(esp_intr_alloc(ETS_CSI_INTR_SOURCE, 0, isr_csi, NULL, &handle_isr_csi));
-    ESP_ERROR_CHECK(esp_intr_alloc(ETS_ISP_INTR_SOURCE, 0, isr_isp, NULL, &handle_isr_isp));
-    ESP_ERROR_CHECK(esp_intr_alloc(ETS_CSI_BRIDGE_INTR_SOURCE, 0, isr_csi_bridge, NULL, &handle_isr_csi_bridge));
-    esp_intr_dump(NULL);
-    // TODO: need to unmask interrupt source in the configuration of each periphery
-
     //mipi ldo
     esp_ldo_channel_handle_t ldo_mipi_phy = NULL;
     esp_ldo_channel_config_t ldo_mipi_phy_config = {
@@ -243,8 +207,7 @@ void app_main(void)
         .output_data_color_type = csi_color,
         .data_lane_num = sensor_cfg.cam_cur_fmt->mipi_info.lane_num,
         .byte_swap_en = false,
-        .queue_items = 1, // FIXME: unclear what this does... 
-        // should we provide multiple famebuffers? may handle than in mipi_on_get_new_trans()?
+        .queue_items = 1, 
     };
     esp_cam_ctlr_handle_t handle = NULL;
     
@@ -278,8 +241,6 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_cam_ctlr_enable(handle));
 
-    csi_ll_en_int();
-
     //---------------ISP Init------------------//
     isp_proc_handle_t isp_proc = NULL;
     esp_isp_processor_cfg_t isp_config = {
@@ -302,28 +263,34 @@ void app_main(void)
 
     //xTaskCreate(task_monitor, "monitor", 4*1024, NULL, tskIDLE_PRIORITY, NULL);
 
-    //ESP_LOGI(TAG, "Main loop");
-    //while(1)
+    ESP_LOGI(TAG, "calling esp_cam_ctlr_receive...");
+    ESP_ERROR_CHECK(esp_cam_ctlr_receive(handle, &new_trans, ESP_CAM_CTLR_MAX_DELAY));
+    ESP_LOGI(TAG, "esp_cam_ctlr_receive returned");
+
+    for (int frame=0 ; frame < 5 ; frame++)
     {
-        ESP_LOGI(TAG, "calling esp_cam_ctlr_receive...");
-        ESP_ERROR_CHECK(esp_cam_ctlr_receive(handle, &new_trans, ESP_CAM_CTLR_MAX_DELAY));
-        ESP_LOGI(TAG, "esp_cam_ctlr_receive returned");
-        usleep(1000*1000); // 1s
+        // trigger a single video frame
+        // first call does not seem to produce a frame, at least on the ESP side
+        esp_cam_sensor_reg_val_t reg = {0};
+        reg.regaddr = 0x010202; // REG_STREAMING
+        reg.value = 0x02; // VT_FSYNC_IN_I2C
+        ESP_ERROR_CHECK(esp_cam_sensor_ioctl(sensor_cfg.cam, ESP_CAM_SENSOR_IOC_S_REG, &reg));
+
+        vTaskDelay(300 / portTICK_PERIOD_MS);
     }
 
+    // stop streaming
     int enable_flag = 0;
     ESP_ERROR_CHECK(esp_cam_sensor_ioctl(sensor_cfg.cam, ESP_CAM_SENSOR_IOC_S_STREAM, &enable_flag));
-
     ESP_LOGI(TAG, "Streaming stopped");
 
-
     ESP_LOGI(TAG, "%u bytes in framebuffer", new_trans.received_size);
-
+#if 0
     uint8_t *buf = (uint8_t *)new_trans.buffer;
     for(uint32_t i=0 ; i<new_trans.received_size ; i++)
     {
         printf(" %02x", buf[i]);
         if (i%1024 == 0) vTaskDelay(10 / portTICK_PERIOD_MS);
     }
-
+#endif
 }
